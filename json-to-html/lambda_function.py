@@ -1,67 +1,11 @@
 import re
 from bs4 import BeautifulSoup, ResultSet,element as Element
+import json
+import boto3
 
-project = {
-  "last_update": "2020-12-21T16:35:58.829Z",
-  "pages": [
-    {
-      "components": [
-        {
-          "child_components": [
-            {
-              "_id": "5fe0ceee47b91400099a4bb2",
-              "name": "div",
-              "child_components": [
-                {
-                  "_id": "5fe0ceee47b91400099a4bb3",
-                  "name": "h1",
-                  "child_components": [],
-                  "text": "world"
-                }
-              ],
-              "text": "hello"
-            }
-          ],
-          "_id": "5fe0ceee47b91400099a4bb1",
-          "name": "editable",
-          "attributes": {
-            "val": "1, 3"
-          },
-          "text": "ciao"
-        },
-        {
-          "child_components": [
-            {
-              "_id": "5fe0ceee47b91400099a4bb5",
-              "name": "div",
-              "child_components": [
-                {
-                  "_id": "5fe0ceee47b91400099a4bb6",
-                  "name": "h1",
-                  "child_components": [],
-                  "text": "world"
-                }
-              ],
-              "text": "hello"
-            }
-          ],
-          "_id": "5fe0ceee47b91400099a4bb4",
-          "name": "editable",
-          "attributes": {
-            "val": "1, 3"
-          },
-          "text": "ciao"
-        }
-      ],
-      "_id": "5fe0ceec25892616637b0511",
-      "name": "index.html"
-    }
-  ],
-  "_id": "5fe0ceec25892616637b0510",
-  "name": "index.html"
-}
-jComponents = project['pages'][0]['components']
-sComponents = []
+s3 = boto3.resource('s3')
+bucket_name = "cms-test-buckett"
+
 
 def convertToHtml(json, element):
 	element += '<' + json['name']
@@ -75,16 +19,33 @@ def convertToHtml(json, element):
 	element += '</'+ json['name'] + ">"
 	return element	
 
-for jComponent in jComponents:
-	sComponent = convertToHtml(jComponent, '')
-	sComponents.append(sComponent)
-
-with open("index.html", "r") as file2:
-	soup = BeautifulSoup(file2.read(), "html.parser")
-	for i, component in enumerate(soup.findAll("editable")):
-		soup = re.sub(str(component), str(sComponents[i]), str(soup), 1)
-	with open('index2.html', 'w') as file:
-		file.write(str(soup))
-
+def lambda_handler(event, context):
+  sComponents = []
+  user = event['user']
+  project = event['project']
+  file = event['file']
+  components = event['pages'][0]['components']
 	
+  for component in components:
+  	sComponent = convertToHtml(component, '')
+  	sComponents.append(sComponent)
+
+  obj = s3.Object('cms-test-buckett', user+'/'+project+'/'+file)
+  body = obj.get()['Body'].read()
+  
+  soup = BeautifulSoup(body, "html.parser")
+  
+  for i, component in enumerate(soup.findAll("editable")):
+  	soup = re.sub(str(component), str(sComponents[i]), str(soup), 1)
+  	
+  s3_file_path = user + '/' + project + '/' + file
+  
+  s3.Bucket(bucket_name).put_object(Key=s3_file_path, Body=soup)
+  file_object = s3.Bucket(bucket_name).Object(s3_file_path)
+  file_object.Acl().put(ACL = 'public-read')
+  
+  return {
+	    'statusCode': 200,
+	  	'body': 'https://'+ bucket_name +'.s3.eu-central-1.amazonaws.com/'+s3_file_path
+	}
 	
